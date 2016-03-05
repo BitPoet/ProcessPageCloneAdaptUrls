@@ -1,0 +1,48 @@
+<?php
+
+
+class ProcessPageCloneAdaptUrls extends WireData implements Module {
+	public static function getModuleInfo() {
+		return array(
+			"version"			=>	'0.0.1',
+			"title"				=>	'Adapt URLs after Cloning',
+			"description"		=>	'Adjust links and img sources in CKEditor fields after page clone',
+			"autoload"			=>	true,
+			"requires"			=>	array("ProcessPageClone"),
+		);
+	}
+	
+	public function init() {
+		$this->addHookAfter('Pages::cloned', $this, 'afterPagesCloned');
+	}
+	
+	public function afterPagesCloned($event) {
+		$oldpage = $event->arguments(0);
+		$newpage = $event->arguments(1);
+		
+		$this->session->message(sprintf($this->_("Adapting links and image urls in page %s"), $newpage->name));
+		
+		$of = $newpage->of();
+		$newpage->of(false);
+		foreach($newpage->template->fieldgroup as $field) {
+			if($field->getInputfield($newpage) instanceof InputfieldCKEditor) {
+				if($field->useLanguages) {
+					foreach(wire('languages') as $language) {
+						$value = $page->getLanguageValue($language, $field->name);
+						$page->setLanguageValue($language, $field->name, $this->updateURLs($value, $oldpage->id, $newpage->id));
+					}
+				} else {
+					$value = $newpage->getUnformatted($field->name);
+					$newpage->set($field->name, $this->updateURLs($value, $oldpage->id, $newpage->id));
+				}
+				$this->session->message(sprintf($this->_("Adapted URLs in field %s"), $field->name));
+			}
+		}
+		$newpage->save();
+		$newpage->of($of);
+	}
+	
+	protected function updateURLs($value, $oldid, $newid) {
+		return preg_replace('~(<[^>]+(?:src|href)\s*=\s*["\'][^"\']*/site/assets/files)/' . $oldid . '/~si', '$1/site/assets/files/' . $newid . '/', $value);
+	}
+}
