@@ -7,4 +7,4 @@ Make sure that ProcessPageClone is installed. Simply extract the zip package int
 
 ## Caveats
 
-Not yet tested with multi-language fields
+Not yet tested with multi-language fields, though the code for it is already there.
