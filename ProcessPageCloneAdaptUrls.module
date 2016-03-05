@@ -4,7 +4,7 @@
 class ProcessPageCloneAdaptUrls extends WireData implements Module {
 	public static function getModuleInfo() {
 		return array(
-			"version"			=>	'0.0.1',
+			"version"			=>	'0.0.2',
 			"title"				=>	'Adapt URLs after Cloning',
 			"description"		=>	'Adjust links and img sources in CKEditor fields after page clone',
 			"autoload"			=>	true,
@@ -26,10 +26,13 @@ class ProcessPageCloneAdaptUrls extends WireData implements Module {
 		$newpage->of(false);
 		foreach($newpage->template->fieldgroup as $field) {
 			if($field->getInputfield($newpage) instanceof InputfieldCKEditor) {
-				if($field->useLanguages) {
+				if($field->type == "FieldtypeTextareaLanguage") {
 					foreach(wire('languages') as $language) {
-						$value = $page->getLanguageValue($language, $field->name);
-						$page->setLanguageValue($language, $field->name, $this->updateURLs($value, $oldpage->id, $newpage->id));
+						$value = $newpage->getLanguageValue($language, $field->name);
+						$this->log->message("Before ({$field->name}): " . $value);
+						$value = $this->updateURLs($value, $oldpage->id, $newpage->id);
+						$this->log->message("After ({$field->name}): " . $value);
+						$newpage->setLanguageValue($language, $field->name, $value);
 					}
 				} else {
 					$value = $newpage->getUnformatted($field->name);
@@ -43,6 +46,6 @@ class ProcessPageCloneAdaptUrls extends WireData implements Module {
 	}
 	
 	protected function updateURLs($value, $oldid, $newid) {
-		return preg_replace('~(<[^>]+(?:src|href)\s*=\s*["\'][^"\']*/site/assets/files)/' . $oldid . '/~si', '$1/site/assets/files/' . $newid . '/', $value);
+		return preg_replace('~(<[^>]+(?:src|href)\s*=\s*["\'][^"\']*/site/assets/files/)' . $oldid . '/~si', '${1}' . $newid . '/', $value);
 	}
 }
