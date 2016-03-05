@@ -4,7 +4,7 @@
 class ProcessPageCloneAdaptUrls extends WireData implements Module {
 	public static function getModuleInfo() {
 		return array(
-			"version"			=>	'0.0.2',
+			"version"			=>	'0.0.3',
 			"title"				=>	'Adapt URLs after Cloning',
 			"description"		=>	'Adjust links and img sources in CKEditor fields after page clone',
 			"autoload"			=>	true,
