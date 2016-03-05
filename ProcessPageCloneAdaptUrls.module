@@ -29,9 +29,7 @@ class ProcessPageCloneAdaptUrls extends WireData implements Module {
 				if($field->type == "FieldtypeTextareaLanguage") {
 					foreach(wire('languages') as $language) {
 						$value = $newpage->getLanguageValue($language, $field->name);
-						$this->log->message("Before ({$field->name}): " . $value);
 						$value = $this->updateURLs($value, $oldpage->id, $newpage->id);
-						$this->log->message("After ({$field->name}): " . $value);
 						$newpage->setLanguageValue($language, $field->name, $value);
 					}
 				} else {
