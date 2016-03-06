@@ -15,141 +15,27 @@
  *
  */
 
-class ProcessPageCloneAdaptUrls extends Process implements Module, ConfigurableModule {
+class ProcessPageCloneAdaptUrls extends WireData implements Module {
 	public static function getModuleInfo() {
 		return array(
-			"version"			=>	'0.0.6',
+			"version"			=>	'0.0.4',
 			"title"				=>	'Adapt URLs after Cloning',
 			"description"		=>	'Adjust links and img sources in CKEditor fields after page clone',
 			"autoload"			=>	true,
 			"requires"			=>	array("ProcessPageClone"),
-//			"permission"		=>	'page-clone'
 		);
 	}
 	
-	/**
-	 * Attach hooks when the module is initialized
-	 */
 	public function init() {
 		$this->addHookAfter('Pages::cloned', $this, 'afterPagesCloned');
-		$this->addHookAfter('Pages::clone', $this, 'afterPagesClone');
-		$this->addHookAfter('Pages::deleted', $this, 'afterPagesDeleted');
 	}
 	
-	/**
-	 * Name of the database table where we store our todos
-	 */
-	protected $tableName = "adapt_urls_todo";
-	
-	/**
-	 * Default number of pages to update in one go
-	 */
-	protected static $defaultToProcess = 50;
-	
-	protected $pagecount = 0;
-	
-	/**
-	 * This is called for every cloned page. We'll just store an entry
-	 * in our todo table.
-	 */
 	public function afterPagesCloned($event) {
-		$this->pagecount++;
-		
 		$oldpage = $event->arguments(0);
 		$newpage = $event->arguments(1);
 		
-		$db = $this->database;
+		$this->session->message(sprintf($this->_("Adapting links and image urls in page %s"), $newpage->name));
 		
-		$sql = "INSERT INTO " . $this->tableName . " (id, oldid) VALUES (:id, :oldid)";
-		
-		$stmt = $db->prepare($sql);
-		$id = $newpage->id;
-		$oldid = $oldpage->id;
-		$stmt->bindParam(":id", $id, PDO::PARAM_INT);
-		$stmt->bindParam(":oldid", $oldid, PDO::PARAM_INT);
-		$stmt->execute();
-	}
-	
-	/**
-	 * Only one call in a recursive clone has recursionlevel zero,
-	 * when we reach this we are ready to start adapting links.
-	 * We'll do the value configured in module settings or self::$defaultToProcess
-	 * at most and leave the rest to manual triggers through the admin menu.
-	 */
-	public function afterPagesClone($event) {
-		$options = $event->arguments(3);
-		
-		if(is_string($options)) $options = Selectors::keyValueStringToArray($options);
-		if(!isset($options['recursionLevel'])) $options['recursionLevel'] = 0; // recursion level
-		
-		// We'll wait for the entry page (level 0) to finish before adapting URLs
-		if($options['recursionLevel'] > 0) return;
-		
-		//for debugging:
-		$this->log->message("Performing URL updates");
-		$count = $this->performUpdates();
-		//$count = 0;
-		
-		$this->session->message(sprintf($this->_("Adapted links in %d of %d cloned pages"), $count, $this->pagecount));
-		$this->pagecount = 0;
-	}
-
-	/**
-	 * Clean up after ourselves (i.e., purge deleted pages from the todo list).
-	 */
-	public function afterPagesDeleted($event) {
-		$page = $event->arguments(0);
-		$this->removeTodoEntry($page->id);
-	}
-
-	/**
-	 * Adapt URLs for the newest 25 entries in our todo table
-	 */
-	protected function performUpdates() {
-		$count = 0;
-		
-		foreach($this->getTodoEntries() as $entry) {
-			$newpage = $this->pages->get($entry["id"]);
-			
-			if( $newpage instanceof NullPage ) {
-				$this->session->warning(sprintf($this->_("Unable to adapt links for page %s, no longer present, removing from list"), $entry["id"]));
-				$this->removeTodoEntry($entry["id"]);
-				continue;
-			}
-
-			$this->adaptURLs($entry["oldid"], $newpage);
-			$count++;
-		}
-
-		return $count;		
-	}
-
-	/**
-	 * Get the most recent todo entries
-	 */
-	protected function getTodoEntries() {
-		$sql = "SELECT id, oldid, UNIX_TIMESTAMP(ts) AS ts FROM " . $this->tableName . " ORDER BY ts DESC LIMIT 0, " . (int) $this->getNumToProcess();
-		$dbres = $this->database->query($sql);
-		
-		$rows = $dbres->fetchAll(PDO::FETCH_ASSOC);
-		if( ! is_array($rows) ) return array();
-		return $rows;
-	}
-	
-	/**
-	 * Remove the processed todo entry from the database
-	 */
-	protected function removeTodoEntry($id) {
-		$stmt = $this->database->prepare("DELETE FROM " . $this->tableName . " WHERE id = :id");
-		$stmt->bindParam(":id", $id, PDO::PARAM_INT);
-		$stmt->execute();
-	}
-	
-	/**
-	 * Go through all CKEditor fields in the new page and rewrite
-	 * the contained asset links.
-	 */
-	public function adaptURLs($oldid, $newpage) {
 		$of = $newpage->of();
 		$newpage->of(false);
 		foreach($newpage->template->fieldgroup as $field) {
@@ -157,219 +43,21 @@ class ProcessPageCloneAdaptUrls extends Process implements Module, ConfigurableM
 				if($field->type == "FieldtypeTextareaLanguage") {
 					foreach(wire('languages') as $language) {
 						$value = $newpage->getLanguageValue($language, $field->name);
-						$value = $this->updateURLs($value, $oldid, $newpage->id);
+						$value = $this->updateURLs($value, $oldpage->id, $newpage->id);
 						$newpage->setLanguageValue($language, $field->name, $value);
 					}
 				} else {
 					$value = $newpage->getUnformatted($field->name);
-					$newpage->set($field->name, $this->updateURLs($value, $oldid, $newpage->id));
+					$newpage->set($field->name, $this->updateURLs($value, $oldpage->id, $newpage->id));
 				}
 				$this->session->message(sprintf($this->_("Adapted URLs in field %s"), $field->name));
 			}
 		}
 		$newpage->save();
 		$newpage->of($of);
-		
-		$this->removeTodoEntry($newpage->id);
 	}
 	
-	/**
-	 * This is where the real replacement happens, we're using a regular
-	 * expression to match href and src attributes with both quoting options
-	 * (single or double quotes) in one go.
-	 */
 	protected function updateURLs($value, $oldid, $newid) {
 		return preg_replace('~(<[^>]+(?:src|href)\s*=\s*["\'][^"\']*/site/assets/files/)' . $oldid . '/~si', '${1}' . $newid . '/', $value);
-	}
-	
-	
-	/**
-	 * Execute hook for our process module, list newest entries and
-	 * let the user run URL adaption for them
-	 */
-	public function ___execute()
-	{
-		$post = $this->input->post;
-		
-		$form = $this->modules->get('InputfieldForm');
-		$form->attr('id', 'ProcessPageCloneAdaptUrlsForm');
-		
-		$this->wire('modules')->get('JqueryWireTabs'); 
-		
-		$fieldset = new InputfieldWrapper();
-		$fieldset->attr('title', $this->_('Pending URL Rewrites')); 
-		$fieldset->addClass('WireTab');
-		$form->add($fieldset); 
-
-		if(! $this->user->isSuperuser() && !$this->user->hasPermssion('page-clone') ) {
-			$f = $this->modules->get('InputfieldMarkup');
-			$f->attr('id+name', 'warnnopermissions');
-			$f->label = $this->_("No permission");
-			$f->attr('value', $this->_("You must have page-clone permission to access this page"));
-			$fieldset->add($f);
-			return $form->render();
-		}
-
-		if($post->doadapturls) {
-			$tstart = time();
-			$count = $this->performUpdates();
-			$tend = time();
-			
-			$duration = $tend - $tstart;
-			
-			$pstats = $this->modules->get('InputfieldMarkup');
-			$pstats->attr('value', sprintf($this->_("Updated URLs in %d pages, duration %d seconds"), $count, $duration));
-			$fieldset->add($pstats);
-		}
-		
-		$stats = $this->modules->get('InputfieldMarkup');
-		$stats->title = $this->_("Status");
-		$stats->attr('value', sprintf($this->_("Currently %d pending rewrites"), $this->countPending()));
-		$fieldset->add($stats);
-
-		$tbl = $this->modules->get('MarkupAdminDataTable');
-		$tbl->setEncodeEntities(false);
-		$tbl->headerRow(array(
-			$this->_("Oig. Page Id"),
-			$this->_("Orig. Page"),
-			$this->_("New Page Id"),
-			$this->_("New Page"),
-			$this->_("Changed")
-		));
-		foreach($this->getTodoEntries() as $entry) {
-			$tbl->row($this->createRowData($entry));
-		}
-		
-		$tblfield = $this->modules->get("InputfieldMarkup");
-		$tblfield->title = $this->_("Pending Rewrites");
-		$tblfield->attr('value', $tbl->render());
-		
-		$fieldset->append($tblfield);
-		
-		$btn = $this->modules->get('InputfieldSubmit');
-		$btn->attr('name+id', "doadapturls");
-		$btn->attr('value', sprintf($this->_("Process newest %d entries"), $this->getNumToProcess()));
-		$btn->addClass('head_button_clone');
-		$form->append($btn);
-
-		return $form->render();
-	}
-	
-	protected function countPending() {
-		$sql = "SELECT COUNT(*) AS cnt FROM " . $this->tableName;
-		$res = $this->database->query($sql);
-		$row = $res->fetch(PDO::FETCH_ASSOC);
-		return $row["cnt"];
-	}
-	
-	/**
-	 * Return the data for the given entry fitting for MarkupAdminDataTable's row() method
-	 */
-	protected function createRowData($entry) {
-		$oldpage = wire('pages')->get($entry["oldid"]);
-		$newpage = wire('pages')->get($entry["id"]);
-		return array(
-			$entry["oldid"],
-			($oldpage instanceof NullPage) ? $this->_("-- deleted --") : "<a href='{$oldpage->url}' title='{$oldpage->path}' target='_blank'>{$oldpage->title}</a>",
-			$entry["id"],
-			($newpage instanceof NullPage) ? $this->_("-- deleted --") : "<a href='{$newpage->url}' title='{$newpage->path}' target='_blank'>{$newpage->title}</a>",
-			date($this->_("Y-m-d H:i:s"), $entry["ts"])
-		);
-	}
-	
-	
-	/**
-	 * Return the number of items to update in one go
-	 * (either from module config or from default value).
-	 */
-	protected function getNumToProcess() {
-		return $this->itemsToProcess ? $this->itemsToProcess : self::$defaultToProcess;
-	}
-	
-	/**
-	 * Create todo table and page when module is installed
-	 */
-	public function ___install() {
-		$this->createTable();
-		$this->createAdminPage();
-	}
-	
-	/**
-	 * Create todo table and page if upgrading from an old version
-	 */
-	public function ___upgrade($oldVersion, $newVersion) {
-		if($this->modules->versionCompare($oldVersion, '0.0.5', '<')) {
-			$this->createTable();
-			$this->createAdminPage();
-		}
-	}
-	
-	/**
-	 * Create a table where we store our to-dos for link adaptions.
-	 *
-	 * A warning will appear if more than 25 pages are cloned at once.
-	 * Only the first 25 pages will have their links adapted, further
-	 * fixes are stored in this table and must be triggered through the
-	 * Setup->AdaptLinks menu entry in the backend.
-	 */
-	protected function createTable() {
-		$sql = "CREATE TABLE IF NOT EXISTS " . $this->tableName . " ( " .
-			   "id int unsigned NOT NULL, " .
-			   "oldid int unsigned, " .
-			   "ts timestamp NULL DEFAULT CURRENT_TIMESTAMP, " .
-			   "PRIMARY KEY (id) " .
-			   ")";
-		$this->database->exec($sql);
-	}
-	
-	/**
-	 * Create an admin page where we can run pending adaptions
-	 */
-	protected function createAdminPage()
-	{
-		$page = new Page();
-		$page->name = "adapturls";
-		$page->template = $this->templates->get('admin');
-		$admin = $this->pages->get($this->config->adminRootPageID);
-		$page->parent = $admin->children('name=page')->first();
-		$page->process = $this->className();
-		$page->title = $this->_("Adapt Asset URLs");
-		$page->addStatus(Page::statusLocked);
-		$page->save();
-	}
-	
-	protected function removeAdminPage()
-	{
-		$page = $this->pages->find('name=adapturls, template=admin');
-		if( ! $page instanceof NullPage ) {
-			$page->removeStatus(Page::statusLocked);
-			$page->delete();
-		}
-	}
-	
-	/**
-	 * Remove the todo table and page
-	 */
-	public function ___uninstall() {
-		$sql = "DROP TABLE IF EXISTS " . $this->tableName;
-		$this->database->exec($sql);
-		$this->removeAdminPage();
-	}
-
-	/**
-	 * Allow admin to override the number of pages adapted in
-	 * one go.
-	 */
-	public function getModuleConfigInputfields($inputfields) {
-		$inputfields = new InputfieldWrapper();
-		
-		$f = $this->modules->get("InputfieldInteger");
-		$f->attr('id+name', 'itemsToProcess');
-		$f->label = $this->_("Number of pages to update");
-		$f->attr('value', $this->itemsToProcess ? $this->itemsToProcess : self::$defaultToProcess);
-		$f->description = sprintf($this->_("Update this many pages in one go. Be careful with this value, as updating too many items in one go may hit memory or time limits! Default is %d."), self::$defaultToProcess);
-		$inputfields->add($f);
-		
-		return $inputfields;
 	}
 }
