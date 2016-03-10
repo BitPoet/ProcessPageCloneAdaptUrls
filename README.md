@@ -1,5 +1,7 @@
 # ProcessPageCloneAdaptUrls
-ProcessWire module that adapts links and img sources in CKEditor fields when cloning a page.
+ProcessWire module that adapts links and img sources in CKEditor fields when cloning a page so the links point to the assets directory of the copy instead of the original.
+
+By default, ProcessWire doesn't touch content in HTML fields (textareas) when cloning a page.
 
 ## Usage
 
