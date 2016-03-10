@@ -9,7 +9,7 @@ Make sure that ProcessPageClone is installed. Simply extract the zip package int
 
 When you clone a page, you'll notice a few additional messages at the top:
 
-![Messages Image](https://bitpoet.github.io/img/ppcau-adminmenu.png)
+![Messages Image](https://bitpoet.github.io/img/ppcau-messages.png)
 
 If you clone whole page trees at once, only the configured number of pages is adapted at once. This is to prevent running into memory or time limits. You can change this value (default 50) in the module's settings, but be careful with it!
 
